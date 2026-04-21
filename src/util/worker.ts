@@ -362,6 +362,11 @@ export class PageWorker {
 
       // see if any work data in the queue
       if (data) {
+        if (await this.crawler.shouldSkipForDomainLimit(data)) {
+          await crawlState.markExcluded(data.url);
+          continue;
+        }
+
         // filter out any out-of-scope pages right away
         if (!(await this.crawler.isInScope(data, this.logDetails))) {
           logger.info("Page no longer in scope", data);
