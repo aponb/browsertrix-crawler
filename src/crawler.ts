@@ -10,6 +10,7 @@ import {
   QueueState,
   PageState,
   WorkerId,
+  DomainStatsEntry,
 } from "./util/state.js";
 
 import { CrawlerArgs, parseArgs } from "./util/argParser.js";
@@ -139,6 +140,9 @@ export class Crawler {
   numOriginalSeeds = 0;
   originalSeedDomains: Set<string> = new Set<string>();
   seedAttributedDomains: Map<number, string> = new Map<number, string>();
+  domainCompletenessIncomplete: Set<string> = new Set<string>();
+  domainCompletenessComplete: Set<string> = new Set<string>();
+  domainCompletenessUnknown: Set<string> = new Set<string>();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   emulateDevice: any = {};
@@ -1392,6 +1396,7 @@ self.__bx_behaviors.selectMainBehavior();
         );
         this.limitHit = false;
       } else {
+        this.markDomainCompletenessUnknownForPage(data);
         const retry = await this.crawlState.markFailed(url, noRetries);
 
         if (this.healthChecker) {
@@ -2267,7 +2272,9 @@ self.__bx_behaviors.selectMainBehavior();
       const domainStatsPath = path.join(this.reportsDir, "domainStats.json");
       try {
         await fsp.mkdir(this.reportsDir, { recursive: true });
-        const domainStats = await this.crawlState.getDomainStats();
+        const domainStats = this.addDomainCompletenessToStats(
+          await this.crawlState.getDomainStats(),
+        );
         await fsp.writeFile(
           domainStatsPath,
           JSON.stringify(domainStats, null, 2),
@@ -2517,6 +2524,7 @@ self.__bx_behaviors.selectMainBehavior();
     }
 
     if (!data.isHTMLPage) {
+      this.markDomainCompletenessUnknownForPage(data);
       data.filteredFrames = [];
 
       logger.info(
@@ -2552,6 +2560,7 @@ self.__bx_behaviors.selectMainBehavior();
     const { seedId, extraHops } = data;
 
     if (!seed) {
+      this.markDomainCompletenessUnknownForPage(data);
       logger.error(
         "Seed not found, likely invalid crawl state - skipping link extraction and behaviors",
         { seedId, ...logDetails },
@@ -2572,6 +2581,12 @@ self.__bx_behaviors.selectMainBehavior();
 
     // skip extraction if at max depth
     if (seed.isAtMaxDepth(depth, extraHops)) {
+      await this.probeDomainStatsCompleteness(
+        page,
+        data,
+        this.params.selectLinks,
+        logDetails,
+      );
       logger.debug("Skipping Link Extraction, At Max Depth", {}, "links");
       return;
     }
@@ -2649,35 +2664,118 @@ self.__bx_behaviors.selectMainBehavior();
 
     const frames = filteredFrames || page.frames();
 
+    await this.runLinkExtraction(
+      frames,
+      selectors,
+      logDetails,
+    );
+  }
+
+  async runLinkExtraction(
+    frames: Frame[],
+    selectors: ExtractSelector[],
+    logDetails: LogDetails,
+  ) {
+    let hadErrors = false;
+
     try {
       for (const { selector, extract, attrOnly } of selectors) {
-        await Promise.allSettled(
-          frames.map((frame) => {
-            const getLinks = frame
-              .evaluate(
+        const results = await Promise.allSettled(
+          frames.map((frame) =>
+            timedRun(
+              frame.evaluate(
                 `self.__bx_behaviors.extractLinks(${JSON.stringify(
                   selector,
                 )}, ${JSON.stringify(extract)}, ${attrOnly})`,
-              )
-              .catch((e) =>
-                logger.warn("Link Extraction failed in frame", {
-                  frameUrl: frame.url,
-                  ...logDetails,
-                  ...formatErr(e),
-                }),
-              );
-
-            return timedRun(
-              getLinks,
+              ),
               PAGE_OP_TIMEOUT_SECS,
               "Link extraction timed out",
               logDetails,
-            );
-          }),
+            ),
+          ),
         );
+
+        for (let i = 0; i < results.length; i++) {
+          const result = results[i];
+          if (result.status === "rejected") {
+            hadErrors = true;
+            logger.warn("Link Extraction failed in frame", {
+              frameUrl: frames[i]?.url(),
+              ...logDetails,
+              ...formatErr(result.reason),
+            });
+          }
+        }
       }
     } catch (e) {
+      hadErrors = true;
       logger.warn("Link Extraction failed", e, "links");
+    }
+
+    return { hadErrors };
+  }
+
+  async probeDomainStatsCompleteness(
+    page: Page,
+    data: PageState,
+    selectors: ExtractSelector[],
+    logDetails: LogDetails,
+  ) {
+    if (!this.isDomainStatsCompletenessEnabled()) {
+      return;
+    }
+
+    if (data.depth !== 0 || data.extraHops !== 0) {
+      return;
+    }
+
+    const domain = this.getAttributedDomain(data.url, data.seedId);
+    if (!domain) {
+      return;
+    }
+
+    const { seedId, depth, extraHops = 0, filteredFrames, callbacks } = data;
+    const prevAddLink = callbacks.addLink;
+    let foundAdditionalInScopeUrl = false;
+
+    callbacks.addLink = async (url: string) => {
+      const res = this.getScope(
+        { url, extraHops: extraHops + 1, depth: depth + 1, seedId, noOOS: false },
+        logDetails,
+      );
+
+      if (res && res.url) {
+        foundAdditionalInScopeUrl = true;
+      }
+    };
+
+    try {
+      const { hadErrors } = await this.runLinkExtraction(
+        filteredFrames || page.frames(),
+        selectors,
+        logDetails,
+      );
+
+      if (hadErrors) {
+        this.domainCompletenessUnknown.add(domain);
+        this.domainCompletenessComplete.delete(domain);
+        return;
+      }
+    } catch (e) {
+      this.domainCompletenessUnknown.add(domain);
+      return;
+    } finally {
+      callbacks.addLink = prevAddLink;
+    }
+
+    if (foundAdditionalInScopeUrl) {
+      this.domainCompletenessIncomplete.add(domain);
+      this.domainCompletenessComplete.delete(domain);
+      return;
+    }
+
+    if (!this.domainCompletenessUnknown.has(domain)) {
+      this.domainCompletenessComplete.add(domain);
     }
   }
 
@@ -2884,6 +2982,59 @@ self.__bx_behaviors.selectMainBehavior();
     }
 
     return null;
+  }
+
+  isDomainStatsCompletenessEnabled() {
+    return (
+      !!this.params.domainStatsCompleteness &&
+      this.params.scopeType === "domain" &&
+      this.params.depth === 0
+    );
+  }
+
+  markDomainCompletenessUnknownForPage(data: PageState) {
+    if (!this.isDomainStatsCompletenessEnabled()) {
+      return;
+    }
+
+    if (data.depth !== 0) {
+      return;
+    }
+
+    const domain = this.getAttributedDomain(data.url, data.seedId);
+    if (!domain || this.domainCompletenessIncomplete.has(domain)) {
+      return;
+    }
+
+    this.domainCompletenessUnknown.add(domain);
+    this.domainCompletenessComplete.delete(domain);
+  }
+
+  addDomainCompletenessToStats(domainStats: DomainStatsEntry[]) {
+    if (!this.isDomainStatsCompletenessEnabled()) {
+      return domainStats;
+    }
+
+    return domainStats.map((entry) => ({
+      ...entry,
+      completeness: this.getDomainCompleteness(entry.domain),
+    }));
+  }
+
+  getDomainCompleteness(domain: string): "complete" | "incomplete" | "unknown" {
+    if (this.domainCompletenessIncomplete.has(domain)) {
+      return "incomplete";
+    }
+
+    if (this.domainCompletenessUnknown.has(domain)) {
+      return "unknown";
+    }
+
+    if (this.domainCompletenessComplete.has(domain)) {
+      return "complete";
+    }
+
+    return "unknown";
   }
 
   async initPages(filename: string, title: string, isReport: boolean = false) {

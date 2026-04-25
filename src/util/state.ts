@@ -233,6 +233,7 @@ export type DomainStatsEntry = {
   bytes: number;
   objects: number;
   limitReached: boolean;
+  completeness?: "complete" | "incomplete" | "unknown";
 };
 
 export type DomainStatsUpdate = {
