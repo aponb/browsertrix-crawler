@@ -2744,9 +2744,28 @@ self.__bx_behaviors.selectMainBehavior();
     let foundAdditionalInScopeUrl = false;
 
     callbacks.addLink = async (url: string) => {
+      logger.debug(
+        "Domain stats completeness probe extracted link",
+        { url, domain, seedId, depth, extraHops, ...logDetails },
+        "links",
+      );
       const res = this.getScope(
         { url, extraHops: extraHops + 1, depth: depth + 1, seedId, noOOS: false },
         logDetails,
+      );
+
+      logger.debug(
+        "Domain stats completeness probe scope result",
+        {
+          candidateUrl: url,
+          domain,
+          seedId,
+          depth,
+          extraHops,
+          scopeResult: res,
+          ...logDetails,
+        },
+        "links",
       );
 
       if (res && res.url) {
@@ -2762,11 +2781,21 @@ self.__bx_behaviors.selectMainBehavior();
       );
 
       if (hadErrors) {
+        logger.debug(
+          "Domain stats completeness probe marked unknown due to extraction errors",
+          { domain, seedId, depth, extraHops, ...logDetails },
+          "links",
+        );
         this.domainCompletenessUnknown.add(domain);
         this.domainCompletenessComplete.delete(domain);
         return;
       }
     } catch (e) {
+      logger.debug(
+        "Domain stats completeness probe marked unknown due to probe exception",
+        { domain, seedId, depth, extraHops, ...formatErr(e), ...logDetails },
+        "links",
+      );
       this.domainCompletenessUnknown.add(domain);
       return;
     } finally {
@@ -2774,12 +2803,22 @@ self.__bx_behaviors.selectMainBehavior();
     }
 
     if (foundAdditionalInScopeUrl) {
+      logger.debug(
+        "Domain stats completeness probe marked incomplete",
+        { domain, seedId, depth, extraHops, ...logDetails },
+        "links",
+      );
       this.domainCompletenessIncomplete.add(domain);
       this.domainCompletenessUnknown.delete(domain);
       this.domainCompletenessComplete.delete(domain);
       return;
     }
 
+    logger.debug(
+      "Domain stats completeness probe marked complete",
+      { domain, seedId, depth, extraHops, ...logDetails },
+      "links",
+    );
     this.domainCompletenessUnknown.delete(domain);
     this.domainCompletenessComplete.add(domain);
   }
