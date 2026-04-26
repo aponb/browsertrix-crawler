@@ -267,4 +267,38 @@ describe("domain attribution", () => {
       }),
     ).toBe(true);
   });
+
+  test("promotes unknown to complete when a later probe succeeds cleanly", async () => {
+    const crawler = Object.create(Crawler.prototype) as any;
+
+    crawler.params = {
+      domainStatsCompleteness: true,
+      scopeType: "domain",
+      depth: 0,
+    };
+    crawler.domainCompletenessIncomplete = new Set();
+    crawler.domainCompletenessUnknown = new Set(["seed.example"]);
+    crawler.domainCompletenessComplete = new Set();
+    crawler.getAttributedDomain = jest.fn().mockReturnValue("seed.example");
+    crawler.runLinkExtraction = jest.fn(async () => ({ hadErrors: false }));
+
+    const data: any = {
+      url: "http://seed.example/",
+      seedId: 0,
+      depth: 0,
+      extraHops: 0,
+      filteredFrames: [],
+      callbacks: {},
+    };
+
+    await crawler.probeDomainStatsCompleteness(
+      {} as any,
+      data,
+      [],
+      {},
+    );
+
+    expect(crawler.domainCompletenessUnknown.has("seed.example")).toBe(false);
+    expect(crawler.domainCompletenessComplete.has("seed.example")).toBe(true);
+  });
 });

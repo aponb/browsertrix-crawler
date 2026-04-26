@@ -2773,13 +2773,13 @@ self.__bx_behaviors.selectMainBehavior();
 
     if (foundAdditionalInScopeUrl) {
       this.domainCompletenessIncomplete.add(domain);
+      this.domainCompletenessUnknown.delete(domain);
       this.domainCompletenessComplete.delete(domain);
       return;
     }
 
-    if (!this.domainCompletenessUnknown.has(domain)) {
-      this.domainCompletenessComplete.add(domain);
-    }
+    this.domainCompletenessUnknown.delete(domain);
+    this.domainCompletenessComplete.add(domain);
   }
 
   async queueInScopeUrls(
