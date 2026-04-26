@@ -1368,7 +1368,7 @@ self.__bx_behaviors.selectMainBehavior();
   async pageFinished(data: PageState, lastErrorText = "") {
     // if page loaded, considered page finished successfully
     // (even if behaviors timed out)
-    const { loadState, logDetails, depth, url, pageSkipped, noRetries } = data;
+    const { loadState, logDetails, depth, url, pageSkipped } = data;
 
     if (data.loadState >= LoadState.FULL_PAGE_LOADED) {
       await this.writePage(data);
@@ -1397,7 +1397,10 @@ self.__bx_behaviors.selectMainBehavior();
         this.limitHit = false;
       } else {
         this.markDomainCompletenessUnknownForPage(data);
-        const retry = await this.crawlState.markFailed(url, noRetries);
+        const retry = await this.crawlState.markFailed(
+          url,
+          data.noRetries || this.shouldSkipRetriesForDomainCompleteness(data),
+        );
 
         if (this.healthChecker) {
           this.healthChecker.incError();
@@ -3002,12 +3005,39 @@ self.__bx_behaviors.selectMainBehavior();
     }
 
     const domain = this.getAttributedDomain(data.url, data.seedId);
-    if (!domain || this.domainCompletenessIncomplete.has(domain)) {
+    if (
+      !domain ||
+      this.hasFinalDomainCompleteness(domain)
+    ) {
       return;
     }
 
     this.domainCompletenessUnknown.add(domain);
     this.domainCompletenessComplete.delete(domain);
+  }
+
+  hasFinalDomainCompleteness(domain: string) {
+    return (
+      this.domainCompletenessIncomplete.has(domain) ||
+      this.domainCompletenessComplete.has(domain)
+    );
+  }
+
+  shouldSkipRetriesForDomainCompleteness(data: PageState) {
+    if (!this.isDomainStatsCompletenessEnabled()) {
+      return false;
+    }
+
+    if (data.depth !== 0) {
+      return false;
+    }
+
+    const domain = this.getAttributedDomain(data.url, data.seedId);
+    if (!domain) {
+      return false;
+    }
+
+    return this.hasFinalDomainCompleteness(domain);
   }
 
   addDomainCompletenessToStats(domainStats: DomainStatsEntry[]) {

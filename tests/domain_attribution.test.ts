@@ -222,4 +222,49 @@ describe("domain attribution", () => {
       false,
     );
   });
+
+  test("does not downgrade complete completeness to unknown for a failed sibling seed", () => {
+    const crawler = Object.create(Crawler.prototype) as any;
+
+    crawler.params = {
+      domainStatsCompleteness: true,
+      scopeType: "domain",
+      depth: 0,
+    };
+    crawler.domainCompletenessIncomplete = new Set();
+    crawler.domainCompletenessUnknown = new Set();
+    crawler.domainCompletenessComplete = new Set(["seed.example"]);
+    crawler.getAttributedDomain = jest.fn().mockReturnValue("seed.example");
+
+    crawler.markDomainCompletenessUnknownForPage({
+      url: "https://seed.example/",
+      seedId: 0,
+      depth: 0,
+    });
+
+    expect(crawler.domainCompletenessComplete.has("seed.example")).toBe(true);
+    expect(crawler.domainCompletenessUnknown.has("seed.example")).toBe(false);
+  });
+
+  test("skips retries for failed sibling seeds once completeness is already known", () => {
+    const crawler = Object.create(Crawler.prototype) as any;
+
+    crawler.params = {
+      domainStatsCompleteness: true,
+      scopeType: "domain",
+      depth: 0,
+    };
+    crawler.domainCompletenessIncomplete = new Set(["seed.example"]);
+    crawler.domainCompletenessUnknown = new Set();
+    crawler.domainCompletenessComplete = new Set();
+    crawler.getAttributedDomain = jest.fn().mockReturnValue("seed.example");
+
+    expect(
+      crawler.shouldSkipRetriesForDomainCompleteness({
+        url: "https://www.seed.example/",
+        seedId: 1,
+        depth: 0,
+      }),
+    ).toBe(true);
+  });
 });
