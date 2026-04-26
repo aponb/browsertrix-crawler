@@ -74,6 +74,7 @@ import { initFlow, nextFlowStep } from "./util/flowbehavior.js";
 import { isDisallowedByRobots, setRobotsConfig } from "./util/robots.js";
 import { request } from "undici";
 import { getRegistrableDomain } from "./util/domain.js";
+import { normalizeUrl } from "./util/normalize.js";
 
 const btrixBehaviors = fs.readFileSync(
   new URL(
@@ -2742,6 +2743,9 @@ self.__bx_behaviors.selectMainBehavior();
     const { seedId, depth, extraHops = 0, filteredFrames, callbacks } = data;
     const prevAddLink = callbacks.addLink;
     let foundAdditionalInScopeUrl = false;
+    const pageUrl =
+      page && typeof page.url === "function" ? page.url() : data.url;
+    const currentPageUrl = normalizeUrl(pageUrl.split("#")[0] || data.url);
 
     callbacks.addLink = async (url: string) => {
       logger.debug(
@@ -2749,8 +2753,27 @@ self.__bx_behaviors.selectMainBehavior();
         { url, domain, seedId, depth, extraHops, ...logDetails },
         "links",
       );
+
+      const normalizedCandidateUrl = normalizeUrl(url.split("#")[0]);
+      if (normalizedCandidateUrl === currentPageUrl) {
+        logger.debug(
+          "Domain stats completeness probe ignoring same-page candidate",
+          { candidateUrl: url, normalizedCandidateUrl, currentPageUrl, ...logDetails },
+          "links",
+        );
+        return;
+      }
+
       const res = this.getScope(
-        { url, extraHops: extraHops + 1, depth: depth + 1, seedId, noOOS: false },
+        {
+          url,
+          // Probe for theoretical follow-up candidates without letting maxDepth=0
+          // suppress same-domain links that would exist on the next hop.
+          extraHops,
+          depth,
+          seedId,
+          noOOS: false,
+        },
         logDetails,
       );
 

@@ -175,8 +175,8 @@ describe("domain attribution", () => {
       1,
       {
         url: "https://seed.example/about",
-        extraHops: 1,
-        depth: 1,
+        extraHops: 0,
+        depth: 0,
         seedId: 0,
         noOOS: false,
       },
@@ -300,5 +300,58 @@ describe("domain attribution", () => {
 
     expect(crawler.domainCompletenessUnknown.has("seed.example")).toBe(false);
     expect(crawler.domainCompletenessComplete.has("seed.example")).toBe(true);
+  });
+
+  test("detects theoretical next-hop in-scope links even when depth is 0", async () => {
+    const crawler = Object.create(Crawler.prototype) as any;
+
+    crawler.params = {
+      domainStatsCompleteness: true,
+      scopeType: "domain",
+      depth: 0,
+    };
+    crawler.domainCompletenessIncomplete = new Set();
+    crawler.domainCompletenessUnknown = new Set();
+    crawler.domainCompletenessComplete = new Set();
+    crawler.getAttributedDomain = jest.fn().mockReturnValue("seed.example");
+    crawler.getScope = jest.fn().mockReturnValue({
+      url: "https://seed.example/about",
+      isOOS: false,
+    });
+    crawler.runLinkExtraction = jest.fn(async (_frames, _selectors, _logDetails) => {
+      await data.callbacks.addLink("https://seed.example/#top");
+      await data.callbacks.addLink("https://seed.example/about");
+      return { hadErrors: false };
+    });
+
+    const data: any = {
+      url: "https://seed.example/",
+      seedId: 0,
+      depth: 0,
+      extraHops: 0,
+      filteredFrames: [],
+      callbacks: {},
+    };
+
+    await crawler.probeDomainStatsCompleteness(
+      {
+        url: () => "https://seed.example/",
+      } as any,
+      data,
+      [],
+      {},
+    );
+
+    expect(crawler.getScope).toHaveBeenCalledWith(
+      {
+        url: "https://seed.example/about",
+        extraHops: 0,
+        depth: 0,
+        seedId: 0,
+        noOOS: false,
+      },
+      {},
+    );
+    expect(crawler.domainCompletenessIncomplete.has("seed.example")).toBe(true);
   });
 });
