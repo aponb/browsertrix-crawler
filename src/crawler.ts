@@ -143,6 +143,7 @@ export class Crawler {
   domainCompletenessIncomplete: Set<string> = new Set<string>();
   domainCompletenessComplete: Set<string> = new Set<string>();
   domainCompletenessUnknown: Set<string> = new Set<string>();
+  lastDomainStatsJson: string | null = null;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   emulateDevice: any = {};
@@ -2278,10 +2279,11 @@ self.__bx_behaviors.selectMainBehavior();
         const domainStats = this.addDomainCompletenessToStats(
           await this.crawlState.getDomainStats(),
         );
-        await fsp.writeFile(
-          domainStatsPath,
-          JSON.stringify(domainStats, null, 2),
-        );
+        const domainStatsJson = JSON.stringify(domainStats, null, 2);
+        if (domainStatsJson !== this.lastDomainStatsJson) {
+          await fsp.writeFile(domainStatsPath, domainStatsJson);
+          this.lastDomainStatsJson = domainStatsJson;
+        }
       } catch (err) {
         logger.warn("Domain stats output failed", err);
       }
