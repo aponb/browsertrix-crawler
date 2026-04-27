@@ -2283,12 +2283,11 @@ self.__bx_behaviors.selectMainBehavior();
     seedId: number;
     depth: number;
   }) {
-    const domain = this.getAttributedDomain(data.url, data.seedId);
+    const domain = await this.getReachedAttributedDomainLimit(
+      data.url,
+      data.seedId,
+    );
     if (!domain) {
-      return false;
-    }
-
-    if (!(await this.crawlState.isDomainLimitReached(domain))) {
       return false;
     }
 
@@ -2763,8 +2762,8 @@ self.__bx_behaviors.selectMainBehavior();
     ts = 0,
     pageid?: string,
   ) {
-    const domain = this.getAttributedDomain(url, seedId);
-    if (domain && (await this.crawlState.isDomainLimitReached(domain))) {
+    const domain = await this.getReachedAttributedDomainLimit(url, seedId);
+    if (domain) {
       logger.debug(
         "Page URL not queued, domain limit reached",
         { url, domain, ...logDetails },
@@ -2834,7 +2833,23 @@ self.__bx_behaviors.selectMainBehavior();
     return false;
   }
 
-  registerAttributedDomainForRedirectSeed(newSeedId: number, origSeedId: number) {
+  async getReachedAttributedDomainLimit(url: string, seedId: number) {
+    const domain = this.getAttributedDomain(url, seedId);
+    if (!domain) {
+      return null;
+    }
+
+    if (!(await this.crawlState.isDomainLimitReached(domain))) {
+      return null;
+    }
+
+    return domain;
+  }
+
+  registerAttributedDomainForRedirectSeed(
+    newSeedId: number,
+    origSeedId: number,
+  ) {
     let domain: string | null | undefined =
       this.seedAttributedDomains.get(origSeedId);
 
