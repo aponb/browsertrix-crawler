@@ -217,6 +217,8 @@ export type SaveState = {
   extraSeeds: string[];
   sitemapDone: boolean;
   excluded?: string[];
+  domainStats?: DomainStatsEntry[];
+  domainCompleteness?: Record<string, DomainCompleteness>;
 };
 
 // ============================================================================
@@ -235,6 +237,8 @@ export type DomainStatsEntry = {
   limitReached: boolean;
   completeness?: "complete" | "incomplete" | "unknown";
 };
+
+export type DomainCompleteness = "complete" | "incomplete" | "unknown";
 
 export type DomainStatsUpdate = {
   bytes: number;
@@ -812,6 +816,7 @@ export class RedisCrawlState extends RedisDedupeIndex {
   domainBytesKey: string;
   domainObjectsKey: string;
   domainLimitReachedKey: string;
+  domainCompletenessKey: string;
 
   esKey: string;
   esMap: string;
@@ -859,6 +864,7 @@ export class RedisCrawlState extends RedisDedupeIndex {
     this.domainBytesKey = this.crawlId + ":domain:bytes";
     this.domainObjectsKey = this.crawlId + ":domain:objects";
     this.domainLimitReachedKey = this.crawlId + ":domain:limit_reached";
+    this.domainCompletenessKey = this.crawlId + ":domain:completeness";
 
     this.esKey = this.crawlId + ":extraSeeds";
     this.esMap = this.crawlId + ":esMap";
@@ -1211,6 +1217,42 @@ return {bytes, objects, limitReached, newlyLimitReached};
     return (await this.redis.hexists(this.domainLimitReachedKey, domain)) === 1;
   }
 
+  async setDomainCompleteness(
+    domain: string,
+    completeness: DomainCompleteness,
+  ) {
+    await this.redis.hset(this.domainCompletenessKey, domain, completeness);
+  }
+
+  async getDomainCompleteness(domain: string): Promise<DomainCompleteness | null> {
+    const completeness = await this.redis.hget(this.domainCompletenessKey, domain);
+    if (
+      completeness === "complete" ||
+      completeness === "incomplete" ||
+      completeness === "unknown"
+    ) {
+      return completeness;
+    }
+    return null;
+  }
+
+  async getDomainCompletenessMap(): Promise<Record<string, DomainCompleteness>> {
+    const completenessMap = await this.redis.hgetall(this.domainCompletenessKey);
+    const result: Record<string, DomainCompleteness> = {};
+
+    for (const [domain, completeness] of Object.entries(completenessMap)) {
+      if (
+        completeness === "complete" ||
+        completeness === "incomplete" ||
+        completeness === "unknown"
+      ) {
+        result[domain] = completeness;
+      }
+    }
+
+    return result;
+  }
+
   async addDomainStats(
     domain: string,
     bytes: number,
@@ -1452,6 +1494,8 @@ return {bytes, objects, limitReached, newlyLimitReached};
     const extraSeeds = await this._iterListKeys(this.esKey, seen);
     const sitemapDone = await this.isSitemapDone();
     const excludedSet = await this._iterSet(this.exKey);
+    const domainStats = await this.getDomainStats();
+    const domainCompleteness = await this.getDomainCompletenessMap();
 
     const finished = [...seen.values()];
     const excluded = [...excludedSet.values()];
@@ -1466,6 +1510,8 @@ return {bytes, objects, limitReached, newlyLimitReached};
       failed,
       errors,
       excluded,
+      domainStats,
+      domainCompleteness,
     };
   }
 
@@ -1571,6 +1617,10 @@ return {bytes, objects, limitReached, newlyLimitReached};
     await this.redis.del(this.skey);
     await this.redis.del(this.ekey);
     await this.redis.del(this.exKey);
+    await this.redis.del(this.domainBytesKey);
+    await this.redis.del(this.domainObjectsKey);
+    await this.redis.del(this.domainLimitReachedKey);
+    await this.redis.del(this.domainCompletenessKey);
 
     let seen: string[] = [];
 
@@ -1669,6 +1719,34 @@ return {bytes, objects, limitReached, newlyLimitReached};
 
     if (state.excluded?.length) {
       await this.redis.sadd(this.exKey, state.excluded);
+    }
+
+    if (state.domainStats?.length) {
+      const pipe = this.redis.pipeline();
+      for (const entry of state.domainStats) {
+        pipe.hset(this.domainBytesKey, entry.domain, entry.bytes);
+        pipe.hset(this.domainObjectsKey, entry.domain, entry.objects);
+        if (entry.limitReached) {
+          pipe.hset(this.domainLimitReachedKey, entry.domain, "1");
+        }
+      }
+      await pipe.exec();
+    }
+
+    if (state.domainCompleteness) {
+      const pipe = this.redis.pipeline();
+      for (const [domain, completeness] of Object.entries(
+        state.domainCompleteness,
+      )) {
+        if (
+          completeness === "complete" ||
+          completeness === "incomplete" ||
+          completeness === "unknown"
+        ) {
+          pipe.hset(this.domainCompletenessKey, domain, completeness);
+        }
+      }
+      await pipe.exec();
     }
 
     return seen.length;
