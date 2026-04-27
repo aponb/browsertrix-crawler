@@ -141,9 +141,10 @@ export class Crawler {
   numOriginalSeeds = 0;
   originalSeedDomains: Set<string> = new Set<string>();
   seedAttributedDomains: Map<number, string> = new Map<number, string>();
-  domainCompletenessIncomplete: Set<string> = new Set<string>();
-  domainCompletenessComplete: Set<string> = new Set<string>();
-  domainCompletenessUnknown: Set<string> = new Set<string>();
+  domainCompletenessByDomain: Map<
+    string,
+    "complete" | "incomplete" | "unknown"
+  > = new Map();
   lastDomainStatsJson: string | null = null;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2809,8 +2810,7 @@ self.__bx_behaviors.selectMainBehavior();
           { domain, seedId, depth, extraHops, ...logDetails },
           "links",
         );
-        this.domainCompletenessUnknown.add(domain);
-        this.domainCompletenessComplete.delete(domain);
+        this.setDomainCompleteness(domain, "unknown");
         return;
       }
     } catch (e) {
@@ -2819,7 +2819,7 @@ self.__bx_behaviors.selectMainBehavior();
         { domain, seedId, depth, extraHops, ...formatErr(e), ...logDetails },
         "links",
       );
-      this.domainCompletenessUnknown.add(domain);
+      this.setDomainCompleteness(domain, "unknown");
       return;
     } finally {
       callbacks.addLink = prevAddLink;
@@ -2831,9 +2831,7 @@ self.__bx_behaviors.selectMainBehavior();
         { domain, seedId, depth, extraHops, ...logDetails },
         "links",
       );
-      this.domainCompletenessIncomplete.add(domain);
-      this.domainCompletenessUnknown.delete(domain);
-      this.domainCompletenessComplete.delete(domain);
+      this.setDomainCompleteness(domain, "incomplete");
       return;
     }
 
@@ -2842,8 +2840,7 @@ self.__bx_behaviors.selectMainBehavior();
       { domain, seedId, depth, extraHops, ...logDetails },
       "links",
     );
-    this.domainCompletenessUnknown.delete(domain);
-    this.domainCompletenessComplete.add(domain);
+    this.setDomainCompleteness(domain, "complete");
   }
 
   async queueInScopeUrls(
@@ -3076,15 +3073,12 @@ self.__bx_behaviors.selectMainBehavior();
       return;
     }
 
-    this.domainCompletenessUnknown.add(domain);
-    this.domainCompletenessComplete.delete(domain);
+    this.setDomainCompleteness(domain, "unknown");
   }
 
   hasFinalDomainCompleteness(domain: string) {
-    return (
-      this.domainCompletenessIncomplete.has(domain) ||
-      this.domainCompletenessComplete.has(domain)
-    );
+    const completeness = this.domainCompletenessByDomain.get(domain);
+    return completeness === "incomplete" || completeness === "complete";
   }
 
   shouldSkipRetriesForDomainCompleteness(data: PageState) {
@@ -3115,20 +3109,15 @@ self.__bx_behaviors.selectMainBehavior();
     }));
   }
 
+  setDomainCompleteness(
+    domain: string,
+    completeness: "complete" | "incomplete" | "unknown",
+  ) {
+    this.domainCompletenessByDomain.set(domain, completeness);
+  }
+
   getDomainCompleteness(domain: string): "complete" | "incomplete" | "unknown" {
-    if (this.domainCompletenessIncomplete.has(domain)) {
-      return "incomplete";
-    }
-
-    if (this.domainCompletenessUnknown.has(domain)) {
-      return "unknown";
-    }
-
-    if (this.domainCompletenessComplete.has(domain)) {
-      return "complete";
-    }
-
-    return "unknown";
+    return this.domainCompletenessByDomain.get(domain) || "unknown";
   }
 
   async initPages(filename: string, title: string, isReport: boolean = false) {
