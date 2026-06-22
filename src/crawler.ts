@@ -205,12 +205,12 @@ export class Crawler {
 
   driver:
     | ((opts: {
-        page: Page;
-        data: PageState;
-        seed: ScopedSeed;
-        // eslint-disable-next-line no-use-before-define
-        crawler: Crawler;
-      }) => Promise<void>)
+    page: Page;
+    data: PageState;
+    seed: ScopedSeed;
+    // eslint-disable-next-line no-use-before-define
+    crawler: Crawler;
+  }) => Promise<void>)
     | null = null;
 
   recording: boolean;
@@ -1427,7 +1427,7 @@ self.__bx_behaviors.selectMainBehavior();
         const retry = await this.crawlState.markFailed(
           url,
           data.noRetries ||
-            (await this.shouldSkipRetriesForDomainCompleteness(data)),
+          (await this.shouldSkipRetriesForDomainCompleteness(data)),
         );
 
         if (this.healthChecker) {
@@ -1613,7 +1613,7 @@ self.__bx_behaviors.selectMainBehavior();
 
     const frameUrl = frame.url();
 
-    if (!frameUrl) {
+    if (!frameUrl || frame.detached) {
       return null;
     }
 
@@ -1630,8 +1630,8 @@ self.__bx_behaviors.selectMainBehavior();
         "Frame check timed out",
         logDetails,
       );
-    } catch (e) {
-      // ignore
+    } catch {
+      // detached frames are expected here; keep tagName empty and fall back below
     }
 
     if (tagName && tagName !== "IFRAME" && tagName !== "FRAME") {
@@ -1660,6 +1660,15 @@ self.__bx_behaviors.selectMainBehavior();
     }
 
     return res ? frame : null;
+  }
+
+  isDetachedFrameError(error: unknown) {
+    const message = formatErr(error).message || "";
+    return [
+      "detached Frame",
+      "Frame detached",
+      "Cannot read properties of undefined (reading 'extractLinks')",
+    ].some((needle) => message.includes(needle));
   }
 
   async updateCurrSize(): Promise<number> {
@@ -2712,18 +2721,34 @@ self.__bx_behaviors.selectMainBehavior();
     try {
       for (const { selector, extract, attrOnly } of selectors) {
         const results = await Promise.allSettled(
-          frames.map((frame) =>
-            timedRun(
-              frame.evaluate(
-                `self.__bx_behaviors.extractLinks(${JSON.stringify(
-                  selector,
-                )}, ${JSON.stringify(extract)}, ${attrOnly})`,
-              ),
-              PAGE_OP_TIMEOUT_SECS,
-              "Link extraction timed out",
-              logDetails,
-            ),
-          ),
+          frames.map(async (frame) => {
+            if (!frame.url() || frame.detached) {
+              return;
+            }
+
+            try {
+              await timedRun(
+                frame.evaluate(
+                  `self.__bx_behaviors.extractLinks(${JSON.stringify(
+                    selector,
+                  )}, ${JSON.stringify(extract)}, ${attrOnly})`,
+                ),
+                PAGE_OP_TIMEOUT_SECS,
+                "Link extraction timed out",
+                logDetails,
+              );
+            } catch (e) {
+              if (this.isDetachedFrameError(e)) {
+                logger.debug("Skipping detached frame during link extraction", {
+                  frameUrl: frame.url(),
+                  ...logDetails,
+                });
+                return;
+              }
+
+              throw e;
+            }
+          }),
         );
 
         for (let i = 0; i < results.length; i++) {
@@ -2954,7 +2979,7 @@ self.__bx_behaviors.selectMainBehavior();
           "general",
           true,
         )
-      ) {
+        ) {
         logger.debug(
           "Cloudflare Check Detected, waiting for reload...",
           logDetails,
