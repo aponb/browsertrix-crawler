@@ -163,10 +163,12 @@ export class Recorder extends EventEmitter {
   pageUrl!: string;
   finalPageUrl = "";
   pageid!: string;
+  pageSeedId!: number;
 
   pageSeed?: ScopedSeed;
   pageSeedDepth = 0;
   dedupePagesMinDepth = -1;
+  dedupeEnabled = true;
 
   frameIdToExecId: Map<string, number> | null;
 
@@ -190,7 +192,10 @@ export class Recorder extends EventEmitter {
 
     this.shouldSaveStorage = !!crawler.params.saveStorage;
 
-    this.dedupePagesMinDepth = crawler.params.dedupePagesMinDepth;
+    this.dedupeEnabled = crawler.params.dedupe;
+    this.dedupePagesMinDepth = this.dedupeEnabled
+      ? crawler.params.dedupePagesMinDepth
+      : -1;
 
     this.writer = writer;
 
@@ -1776,7 +1781,7 @@ export class Recorder extends EventEmitter {
 
     let origRecSize = 0;
 
-    if (!isEmpty && url) {
+    if (this.dedupeEnabled && !isEmpty && url) {
       const res = await this.crawlState.getHashDupe(hash);
 
       // if only writing revisit, ensure it's a revisit and hash
@@ -1843,9 +1848,42 @@ export class Recorder extends EventEmitter {
 
     const addStatsCallback = async (size: number) => {
       try {
-        await this.crawlState.addHashNew(hash, url, date, size, origRecSize);
+        if (this.dedupeEnabled) {
+          await this.crawlState.addHashNew(hash, url, date, size, origRecSize);
+        }
+        if (url) {
+          const domain = this.crawler.getAttributedDomain(url, this.pageSeedId);
+          if (domain) {
+            let readSize;
+            if (reqresp.readSize > 0) {
+              readSize = reqresp.readSize;
+            } else {
+              readSize = 0;
+            }
+            const stats = await this.crawlState.addDomainStats(
+              domain,
+              readSize,
+              this.crawler.params.maxBytesPerDomain,
+              this.crawler.params.maxObjectsPerDomain,
+            );
+
+            if (stats.newlyLimitReached) {
+              logger.info(
+                "Domain limit reached",
+                {
+                  domain,
+                  bytes: stats.bytes,
+                  objects: stats.objects,
+                  maxBytesPerDomain: this.crawler.params.maxBytesPerDomain,
+                  maxObjectsPerDomain: this.crawler.params.maxObjectsPerDomain,
+                },
+                "recorder",
+              );
+            }
+          }
+        }
       } catch (e) {
-        logger.warn("Error adding dupe hash", e, "recorder");
+        logger.warn("Error updating crawl stats", e, "recorder");
       }
     };
 
