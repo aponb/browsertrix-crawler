@@ -132,6 +132,7 @@ export enum SkippedReason {
   Duplicate = "duplicate",
   RateLimit = "rateLimited",
   Failed = "failed",
+  DomainLimit = "domainLimit",
 }
 
 // Direct Fetch Error Constants

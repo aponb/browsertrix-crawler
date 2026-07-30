@@ -387,6 +387,20 @@ class ArgParser {
             "If set, output stats as JSON to this file. (Relative filename resolves to crawl working directory)",
         },
 
+        writeDomainStats: {
+          type: "boolean",
+          default: false,
+          describe:
+            "If set, output attributed per-domain crawl budget stats as JSON to reports/domainStats.json in the collection directory",
+        },
+
+        domainStatsCompleteness: {
+          type: "boolean",
+          default: false,
+          describe:
+            "If set, add an optional completeness signal to domainStats.json for domain-scope crawls at depth 0, based on whether additional in-scope URLs are discovered from crawled depth-0 pages",
+        },
+
         behaviors: {
           describe: "Which background behaviors to enable on each page",
           type: "array",
@@ -471,6 +485,13 @@ class ArgParser {
           type: "string",
         },
 
+        dedupe: {
+          describe:
+            "If set, enable content-based deduplication and WARC revisit records",
+          type: "boolean",
+          default: true,
+        },
+
         dedupePagesMinDepth: {
           describe:
             "If set >= 0, minimum depth at which duplicate pages can be skipped. -1 means never skip duplicate pages",
@@ -512,6 +533,20 @@ class ArgParser {
             "If set, save state and exit if size limit exceeds this value",
           type: "number",
           default: 0,
+        },
+
+        maxBytesPerDomain: {
+          describe:
+            "If set, mark an attributed domain as limitReached once recorded response payload bytes counted toward that domain during the crawl reach this value; further page URLs attributed to that domain will be skipped. -1 means unlimited",
+          type: "number",
+          default: -1,
+        },
+
+        maxObjectsPerDomain: {
+          describe:
+            "If set, mark an attributed domain as limitReached once recorded response objects counted toward that domain during the crawl reach this value; further page URLs attributed to that domain will be skipped. -1 means unlimited",
+          type: "number",
+          default: -1,
         },
 
         diskUtilization: {
