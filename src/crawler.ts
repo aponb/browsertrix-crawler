@@ -849,6 +849,7 @@ export class Crawler {
 
   async setupPage(opts: WorkerState) {
     const { page, cdp, workerid, frameIdToExecId, recorder } = opts;
+    const { callbacks } = opts.data;
 
     const addLink = async (url: string, alwaysObeyScope: boolean = false) => {
       const { seedId, depth, extraHops = 0, logDetails } = opts.data;
@@ -867,6 +868,8 @@ export class Crawler {
         ignoreScope,
       });
     };
+
+    callbacks.addLink = addLink;
 
     await this.browser.setupPage({ page, cdp });
 
@@ -917,7 +920,10 @@ export class Crawler {
       await this.screencaster.screencastPage(page, cdp, workerid);
     }
 
-    await page.exposeFunction(BxFunctionBindings.AddLinkFunc, addLink);
+    await page.exposeFunction(
+      BxFunctionBindings.AddLinkFunc,
+      (url: string) => callbacks.addLink && callbacks.addLink(url),
+    );
 
     // used for both behaviors and link extraction now
     await this.browser.addInitScript(page, btrixBehaviors);
