@@ -2874,9 +2874,23 @@ self.__bx_behaviors.selectMainBehavior();
 
     try {
       for (const { selector, extract, attrOnly } of selectors) {
-        const results = await Promise.allSettled(
-          frames.map((frame) =>
-            timedRun(
+        for (const frame of frames) {
+          if (
+            typeof (frame as unknown as { isDetached?: () => boolean }).isDetached ===
+              "function" &&
+            (frame as unknown as { isDetached: () => boolean }).isDetached()
+          ) {
+            hadErrors = true;
+            logger.warn("Link Extraction failed in frame", {
+              frameUrl: frame.url(),
+              ...logDetails,
+              message: "Attempted to use detached frame",
+            });
+            continue;
+          }
+
+          try {
+            await timedRun(
               frame.evaluate(
                 `self.__bx_behaviors.extractLinks(${JSON.stringify(
                   selector,
@@ -2885,18 +2899,13 @@ self.__bx_behaviors.selectMainBehavior();
               PAGE_OP_TIMEOUT_SECS,
               "Link extraction timed out",
               logDetails,
-            ),
-          ),
-        );
-
-        for (let i = 0; i < results.length; i++) {
-          const result = results[i];
-          if (result.status === "rejected") {
+            );
+          } catch (e) {
             hadErrors = true;
             logger.warn("Link Extraction failed in frame", {
-              frameUrl: frames[i]?.url(),
+              frameUrl: frame.url(),
               ...logDetails,
-              ...formatErr(result.reason),
+              ...formatErr(e),
             });
           }
         }
