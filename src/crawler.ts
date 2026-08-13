@@ -2993,6 +2993,8 @@ self.__bx_behaviors.selectMainBehavior();
     };
 
     try {
+      // Probe all frames, but keep the result conservative:
+      // any frame-level failure makes completeness unknown.
       const { hadErrors } = await this.runLinkExtraction(
         filteredFrames || page.frames(),
         selectors,
